@@ -6,13 +6,14 @@ from __future__ import absolute_import
 from datetime import datetime, date, timedelta
 from time import strptime, mktime
 from xml.sax.saxutils import unescape
-from urllib2 import urlopen
 
-from pytz import timezone
+from bs4 import BeautifulStoneSoup, Tag
+from dateutil.rrule import rruleset, rrulestr
 from icalendar.cal import Calendar, Event
-from BeautifulSoup import BeautifulStoneSoup, Tag
+from pytz import timezone
 import six
 from six.moves import map
+from six.moves.urllib.request import urlopen
 
 
 TIME_FORMATS = (
@@ -21,6 +22,31 @@ TIME_FORMATS = (
     "%a %b %d, %Y",
     "%Y-%m-%dT%H:%M:%S"
 )
+
+
+def parse_recurrences(recur_rule, start, exclusions):
+    """ Find all reoccuring events """
+    # Lifted from:
+    # https://gist.github.com/meskarune/63600e64df56a607efa211b9a87fb443
+    rules = rruleset()
+    first_rule = rrulestr(recur_rule, dtstart=start)
+    rules.rrule(first_rule)
+    if not isinstance(exclusions, list):
+        exclusions = [exclusions]
+        for xdate in exclusions:
+            try:
+                ex_date = xdate.dts[0].dt
+                if not isinstance(ex_date, datetime):
+                    ex_date = datetime.combine(ex_date, datetime.min.time())
+                rules.exdate(ex_date)
+            except AttributeError:
+                pass
+    now = (
+        datetime.now(start.tzinfo)
+        if hasattr(start, 'tzinfo') and start.tzinfo is not None else
+        datetime.now()
+    )
+    return rules.after(now)
 
 
 def _parse_time(time_str, reference_date=None):
@@ -93,9 +119,10 @@ def _normalize(data_string, convert_whitespace=False):
 
 
 class CalendarEvent(dict):
-    """\
-    A modified dictionary that allows accessing and modifying the main properties of a calendar event
-    as both attributes, and dictionary keys; i.e. 'event["name"]' is the same as using 'event.name'
+    """
+    A modified dictionary that allows accessing and modifying the main
+    properties of a calendar event as both attributes, and dictionary
+    keys; i.e. 'event["name"]' is the same as using 'event.name'
 
     Only the following event-specific properties may be accessed/modified as attributes:
     "name", "description", "location", "start_time", "end_time", "all_day",
@@ -103,6 +130,7 @@ class CalendarEvent(dict):
 
     CalendarEvents may also be compared using the >, >=, <, <=, comparison operators, which compare
     the starting times of the events.
+
     """
     __slots__ = (
         "name",
@@ -148,7 +176,7 @@ class CalendarEvent(dict):
 
 
 class CalendarParser(object):
-    """\
+    """
     A practical calendar parser for Google Calendar's two output formats: XML, and iCal (.ics).
     Stores events as a list of dictionaries with self-describing attributes.
     Accepts url resources as well as local xml/ics files.
@@ -263,12 +291,12 @@ class CalendarParser(object):
         self.last_updated = _parse_time(metadata[0].next)
         self.date_published = _parse_time(
             metadata[1].contents[6].contents[5].next.next.contents[1].next)
-        
+
         raw_events = self.calendar.contents[3:]
 
         if overwrite_events:
             self.events = []
-        
+
         for event in raw_events:
             event_dict = CalendarEvent()
             event_dict["name"] = _normalize(event.next.next)
@@ -378,6 +406,19 @@ class CalendarParser(object):
 
                     event_dict["repeats"] = True
                     event_dict["repeat_freq"] = rep_dict["FREQ"][0]
+                    now = datetime.now()
+                    if "UNTIL" in rep_dict:
+                        event_dict["repeat_until"] = _fix_timezone(rep_dict["UNTIL"][0], self.time_zone)
+                    next_start = parse_recurrences(
+                        event.get('rrule').to_ical().decode('utf-8'),
+                        event.get('dtstart').dt,
+                        event.get('exdate')
+                    )
+                    if next_start:
+                        next_start = _fix_timezone(next_start, self.time_zone)
+                        delta = next_start - event_dict['start_time']
+                        event_dict['start_time'] = next_start
+                        event_dict['end_time'] += delta
 
                     if event_dict["repeat_freq"] == "YEARLY":
                         event_dict["repeat_day"] = event_dict["start_time"].day
@@ -390,9 +431,6 @@ class CalendarParser(object):
 
                     if "BYMONTH" in rep_dict:
                         event_dict["repeat_month"] = rep_dict["BYMONTH"][0]
-
-                    if "UNTIL" in rep_dict:
-                        event_dict["repeat_until"] = _fix_timezone(rep_dict["UNTIL"][0], self.time_zone)
 
                 if overwrite_events:
                     self.events.append(event_dict)

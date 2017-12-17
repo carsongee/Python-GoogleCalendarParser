@@ -8,6 +8,7 @@ setup(
         'pytz',
         'beautifulsoup4',
         'icalendar',
+        'python-dateutil',
         'six',
     ],
 )
