@@ -365,7 +365,7 @@ class CalendarParser(object):
                 self.events.append(event_dict)
 
             yield event_dict
-                
+
     def parse_ics(self, overwrite_events=True):
         "Returns a generator of Event dictionaries from an iCal (.ics) file."
         assert self.ics_url or self.ics_url, "No ics resource has been set."
@@ -373,7 +373,9 @@ class CalendarParser(object):
         # Returns an icalendar.Calendar object.
         self.fetch_calendar(force_ics=True)
 
-        self.time_zone = timezone(str(self.calendar["x-wr-timezone"]))
+        self.time_zone = timezone(str(
+            self.calendar.get("x-wr-timezone", 'UTC')
+        ))
         self.title = str(self.calendar["x-wr-calname"])
 
         if overwrite_events:
