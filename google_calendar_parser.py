@@ -28,8 +28,13 @@ def parse_recurrences(recur_rule, start, exclusions):
     """ Find all reoccuring events """
     # Lifted from:
     # https://gist.github.com/meskarune/63600e64df56a607efa211b9a87fb443
+    has_tz = (
+        True if hasattr(start, 'tzinfo') and start.tzinfo is not None
+        else False
+    )
+
     rules = rruleset()
-    first_rule = rrulestr(recur_rule, dtstart=start)
+    first_rule = rrulestr(recur_rule, dtstart=start, ignoretz=not has_tz)
     rules.rrule(first_rule)
     if not isinstance(exclusions, list):
         exclusions = [exclusions]
@@ -41,11 +46,7 @@ def parse_recurrences(recur_rule, start, exclusions):
                 rules.exdate(ex_date)
             except AttributeError:
                 pass
-    now = (
-        datetime.now(start.tzinfo)
-        if hasattr(start, 'tzinfo') and start.tzinfo is not None else
-        datetime.now()
-    )
+    now = datetime.now(start.tzinfo) if has_tz else datetime.now()
     return rules.after(now)
 
 
