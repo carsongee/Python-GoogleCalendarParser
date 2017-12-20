@@ -386,6 +386,7 @@ class CalendarParser(object):
                 event_dict = CalendarEvent()
                 if "SUMMARY" in event:
                     event_dict["name"] = _normalize(event["summary"])
+
                 if "DESCRIPTION" in event:
                     event_dict["description"] = _normalize(event["description"])
                 if "LOCATION" in event and event["location"]:
